@@ -3,9 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-  "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-  "build": "tsc",
-  "start": "node dist/server.js"
+  "dev": "tsx watch server.ts",
+  "start": "tsx server.ts"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +14,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "mongodb": "^7.1.0",
     "mongoose": "^8.23.0"
   },
   "description": "",
@@ -24,6 +24,7 @@
     "@types/mongoose": "^5.11.96",
     "@types/node": "^25.3.0",
     "ts-node-dev": "^2.0.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }
