@@ -14,7 +14,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middlewares
-// Aumentamos o limite do JSON para suportar o envio de imagens em Base64
+// Limite de 50mb é fundamental para que as imagens em Base64 não deem erro 'Payload Too Large'
 app.use(cors()); 
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -24,12 +24,7 @@ mongoose.connect(process.env.MONGO_URI as string)
   .then(() => console.log('🔥 MongoDB Conectado com Sucesso!'))
   .catch((err) => console.error('Erro ao conectar no Mongo:', err));
 
-// --- ROTAS (ENDPOINTS) ---
-
-// Rota de Teste
-app.get('/', (req: Request, res: Response) => {
-  res.json({ message: 'API do AcadeMe está online!' });
-});
+// --- ROTAS DE ALUNOS ---
 
 // 1. Cadastro de Aluno (Signup)
 app.post('/students', async (req: Request, res: Response) => {
@@ -46,16 +41,12 @@ app.post('/students', async (req: Request, res: Response) => {
 app.post('/students/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
-
     const student = await Student.findOne({ email });
-    if (!student) {
-      return res.status(404).json({ error: 'Usuário não encontrado.' });
-    }
+    
+    if (!student) return res.status(404).json({ error: 'Usuário não encontrado.' });
 
     const isMatch = await bcrypt.compare(password, student.password);
-    if (!isMatch) {
-      return res.status(401).json({ error: 'Senha incorreta.' });
-    }
+    if (!isMatch) return res.status(401).json({ error: 'Senha incorreta.' });
 
     const { password: _, ...userData } = student.toObject();
     res.json({ message: 'Login realizado com sucesso!', user: userData });
@@ -64,18 +55,12 @@ app.post('/students/login', async (req: Request, res: Response) => {
   }
 });
 
-// 3. ATUALIZAR PERFIL (Incluindo Imagem de Perfil)
+// 3. Atualizar Perfil do Aluno (Bio, Curso, Foto)
 app.put('/students/:id', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const updatedStudent = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!updatedStudent) return res.status(404).json({ error: 'Aluno não encontrado.' });
     
-    // O findByIdAndUpdate com { new: true } retorna o documento já atualizado
-    const updatedStudent = await Student.findByIdAndUpdate(id, req.body, { new: true });
-    
-    if (!updatedStudent) {
-      return res.status(404).json({ error: 'Aluno não encontrado.' });
-    }
-
     const { password, ...userData } = updatedStudent.toObject();
     res.json(userData);
   } catch (error) {
@@ -83,7 +68,7 @@ app.put('/students/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Listar todos os Alunos (Vitrine)
+// 4. Listar Alunos (Vitrine)
 app.get('/students', async (req: Request, res: Response) => {
   try {
     const students = await Student.find().select('-password');
@@ -93,7 +78,9 @@ app.get('/students', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Adicionar um Projeto para um Aluno
+// --- ROTAS DE PROJETOS ---
+
+// 5. Criar Projeto
 app.post('/projects', async (req: Request, res: Response) => {
   try {
     const project = await Project.create(req.body);
@@ -103,11 +90,43 @@ app.post('/projects', async (req: Request, res: Response) => {
   }
 });
 
-// 6. Listar Projetos de um Aluno Específico
+// 6. Buscar DETALHES de um projeto (NECESSÁRIO PARA O EDITAR FUNCIONAR)
+app.get('/projects/:id', async (req: Request, res: Response) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+    res.json(project);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar projeto' });
+  }
+});
+
+// 7. Atualizar Projeto (PUT)
+app.put('/projects/:id', async (req: Request, res: Response) => {
+  try {
+    const updatedProject = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!updatedProject) return res.status(404).json({ error: 'Projeto não encontrado' });
+    res.json(updatedProject);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao atualizar projeto' });
+  }
+});
+
+// 8. Excluir Projeto (DELETE)
+app.delete('/projects/:id', async (req: Request, res: Response) => {
+  try {
+    const deletedProject = await Project.findByIdAndDelete(req.params.id);
+    if (!deletedProject) return res.status(404).json({ error: 'Projeto não encontrado' });
+    res.json({ message: 'Projeto excluído com sucesso!' });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao excluir projeto' });
+  }
+});
+
+// 9. Listar Projetos de um Aluno Específico
 app.get('/students/:id/projects', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const projects = await Project.find({ student: id }).populate('student', 'name course');
+    const projects = await Project.find({ student: req.params.id }).populate('student', 'name course');
     res.json(projects);
   } catch (error) {
     res.status(500).json({ error: 'Erro ao buscar projetos do aluno' });
@@ -116,5 +135,5 @@ app.get('/students/:id/projects', async (req: Request, res: Response) => {
 
 // Inicia o Servidor
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor AcadeMe rodando na porta ${PORT}`);
 });
