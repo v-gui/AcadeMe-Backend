@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3001;
 // Middlewares
 // Limite de 50mb é fundamental para que as imagens em Base64 não deem erro 'Payload Too Large'
 app.use(cors({
-  origin: 'https://acade-me-frontend.vercel.app/',
+  origin: 'https://acade-me-frontend.vercel.app',
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' })); 
