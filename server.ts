@@ -12,11 +12,15 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://acade-me-frontend.vercel.app'
+];
 
 // Middlewares
 // Limite de 50mb é fundamental para que as imagens em Base64 não deem erro 'Payload Too Large'
 app.use(cors({
-  origin: 'https://acade-me-frontend.vercel.app', // SEM a barra no final
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' })); 
@@ -78,6 +82,18 @@ app.get('/students', async (req: Request, res: Response) => {
     res.json(students);
   } catch (error) {
     res.status(500).json({ error: 'Erro ao buscar alunos' });
+  }
+});
+
+// --- NOVA ROTA: BUSCAR UM ALUNO ESPECÍFICO ---
+// Necessária para a página de StudentProfileView carregar os dados pelo ID da URL
+app.get('/students/:id', async (req: Request, res: Response) => {
+  try {
+    const student = await Student.findById(req.params.id).select('-password');
+    if (!student) return res.status(404).json({ error: 'Aluno não encontrado.' });
+    res.json(student);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar dados do perfil do aluno.' });
   }
 });
 

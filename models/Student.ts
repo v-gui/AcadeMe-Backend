@@ -1,6 +1,11 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+// Validation function for array limit
+function arrayLimit(val: string[]): boolean {
+  return val.length <= 5;
+}
+
 export interface IStudent extends Document {
   name: string;
   email: string;
@@ -8,7 +13,9 @@ export interface IStudent extends Document {
   bio?: string;
   profileImage?: string;
   contactLink?: string;
-  password: string; // Adicionado para autenticação
+  password: string;
+  interests: string[];
+  
 }
 
 const StudentSchema: Schema = new Schema({
@@ -18,7 +25,13 @@ const StudentSchema: Schema = new Schema({
   bio: { type: String },
   profileImage: { type: String },
   contactLink: { type: String },
-  password: { type: String, required: true } // Campo obrigatório para o Login
+  password: { type: String, required: true },
+  interests: { 
+    type: [String], 
+    default: [],
+    // Opcional: Validação no banco para garantir o limite de 5
+    validate: [arrayLimit, '{PATH} excede o limite de 5 áreas de interesse']
+  }
 }, {
   timestamps: true 
 });
