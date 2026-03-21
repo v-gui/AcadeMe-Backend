@@ -190,17 +190,26 @@ app.get('/students/:id/invites', async (req: Request, res: Response) => {
   }
 });
 
-//11. Verificar se o Aluno tem Projetos Ativos
+// 11. Verificar se o Aluno tem Projetos Ativos (Corrigido)
 app.get('/students-active', async (req: Request, res: Response) => {
   try {
-    const activeStudentIds = await Project.distinct('students.student', { 
-      'students.status': 'accepted' 
-    });
+    // Usamos aggregate para filtrar o item exato dentro do array
+    const result = await Project.aggregate([
+      { $unwind: '$students' }, // "Quebra" o array de alunos em documentos individuais
+      { $match: { 'students.status': 'accepted' } }, // Filtra apenas quem aceitou
+      { $group: { _id: '$students.student' } } // Agrupa para remover IDs duplicados
+    ]);
+
+    // Extrai apenas os IDs do resultado do agrupamento
+    const activeStudentIds = result.map(item => item._id);
+
     const activeStudents = await Student.find({ 
       _id: { $in: activeStudentIds } 
     }).select('-password');
+
     res.json(activeStudents);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: 'Erro ao carregar talentos ativos' });
   }
 });
