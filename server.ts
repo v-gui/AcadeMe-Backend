@@ -18,7 +18,6 @@ const allowedOrigins = [
 ];
 
 // Middlewares
-// Limite de 50mb é fundamental para que as imagens em Base64 não deem erro 'Payload Too Large'
 app.use(cors({
   origin: allowedOrigins,
   credentials: true
@@ -33,7 +32,6 @@ mongoose.connect(process.env.MONGO_URI as string)
 
 // --- ROTAS DE ALUNOS ---
 
-// 1. Cadastro de Aluno (Signup)
 app.post('/students', async (req: Request, res: Response) => {
   try {
     const student = await Student.create(req.body);
@@ -44,7 +42,6 @@ app.post('/students', async (req: Request, res: Response) => {
   }
 });
 
-// 2. Login de Aluno
 app.post('/students/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -62,7 +59,6 @@ app.post('/students/login', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Atualizar Perfil do Aluno (Bio, Curso, Foto)
 app.put('/students/:id', async (req: Request, res: Response) => {
   try {
     const updatedStudent = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -75,7 +71,6 @@ app.put('/students/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Listar Alunos (Vitrine)
 app.get('/students', async (req: Request, res: Response) => {
   try {
     const students = await Student.find().select('-password');
@@ -85,8 +80,6 @@ app.get('/students', async (req: Request, res: Response) => {
   }
 });
 
-// --- NOVA ROTA: BUSCAR UM ALUNO ESPECÍFICO ---
-// Necessária para a página de StudentProfileView carregar os dados pelo ID da URL
 app.get('/students/:id', async (req: Request, res: Response) => {
   try {
     const student = await Student.findById(req.params.id).select('-password');
@@ -97,9 +90,9 @@ app.get('/students/:id', async (req: Request, res: Response) => {
   }
 });
 
-// --- ROTAS DE PROJETOS ---
+// --- ROTAS DE PROJETOS (AJUSTADAS PARA COLABORADORES) ---
 
-// 5. Criar Projeto
+// 5. Criar Projeto (O corpo agora deve enviar um array 'students')
 app.post('/projects', async (req: Request, res: Response) => {
   try {
     const project = await Project.create(req.body);
@@ -109,10 +102,10 @@ app.post('/projects', async (req: Request, res: Response) => {
   }
 });
 
-// 6. Buscar DETALHES de um projeto (NECESSÁRIO PARA O EDITAR FUNCIONAR)
 app.get('/projects/:id', async (req: Request, res: Response) => {
   try {
-    const project = await Project.findById(req.params.id);
+    // Populamos a lista de alunos para que o frontend saiba quem são os colaboradores
+    const project = await Project.findById(req.params.id).populate('students', 'name profileImage course');
     if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
     res.json(project);
   } catch (error) {
@@ -120,7 +113,6 @@ app.get('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 7. Atualizar Projeto (PUT)
 app.put('/projects/:id', async (req: Request, res: Response) => {
   try {
     const updatedProject = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -131,7 +123,6 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 8. Excluir Projeto (DELETE)
 app.delete('/projects/:id', async (req: Request, res: Response) => {
   try {
     const deletedProject = await Project.findByIdAndDelete(req.params.id);
@@ -142,13 +133,64 @@ app.delete('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 9. Listar Projetos de um Aluno Específico
+// 9. LISTAR PROJETOS DE UM ALUNO (Como dono ou colaborador)
+
+app.put('/projects/:projectId/respond-invite', async (req: Request, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { studentId, status } = req.body;
+
+    if (!['accepted', 'declined'].includes(status)) {
+      return res.status(400).json({ error: 'Status inválido.' });
+    }
+
+    // Atualiza o status do estudante específico dentro do array
+    const project = await Project.findOneAndUpdate(
+      { _id: projectId, "students.student": studentId },
+      { $set: { "students.$.status": status } },
+      { new: true }
+    );
+
+    if (!project) return res.status(404).json({ error: 'Projeto ou convite não encontrado.' });
+
+    res.json({ message: `Convite ${status === 'accepted' ? 'aceito' : 'recusado'}!`, project });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao processar resposta do convite.' });
+  }
+});
+
+// Ajustado para procurar o ID do aluno dentro do array 'students'
 app.get('/students/:id/projects', async (req: Request, res: Response) => {
   try {
-    const projects = await Project.find({ student: req.params.id }).populate('student', 'name course');
+    const { id } = req.params;    
+    const projects = await Project.find({
+      students: { 
+        $elemMatch: { student: id, status: 'aceito' } 
+      }
+    }).populate('students.student', 'name course profileImage');
     res.json(projects);
   } catch (error) {
     res.status(500).json({ error: 'Erro ao buscar projetos do aluno' });
+  }
+});
+
+// 10. Buscar Convites Pendentes de um Aluno
+app.get('/students/:id/invites', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Buscamos projetos onde o aluno está no array 'students' COM status 'pending'
+    const invites = await Project.find({
+      students: { 
+        $elemMatch: { student: id, status: 'pending' } 
+      }
+    })
+    .populate('students.student', 'name profileImage course') // Traz dados dos outros membros
+    .sort({ createdAt: -1 }); // Convites mais recentes primeiro
+
+    res.json(invites);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar convites pendentes.' });
   }
 });
 

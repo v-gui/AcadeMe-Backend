@@ -3,12 +3,13 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IProject extends Document {
   title: string;
   description: string;
-  tags: string[]; // Ex: ["React", "Backend", "Design"]
+  tags: string[];
   imageUrl?: string;
   projectLink?: string;
-  student: mongoose.Types.ObjectId; // Referência ao ID do aluno
-  
-  // --- NOVOS CAMPOS ADICIONADOS ---
+  students: { 
+    student: mongoose.Types.ObjectId; 
+    status: 'pending' | 'accepted' | 'declined';
+  }[];
   posters: { url: string; name: string }[];
   files: { name: string; date: string; base64?: string }[];
   references: string[];
@@ -17,26 +18,38 @@ export interface IProject extends Document {
 const ProjectSchema: Schema = new Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
+  
+  // Adicionando default: [] em todos para evitar erros de validação
   tags: { type: [String], default: [] },
-  imageUrl: { type: String },
-  projectLink: { type: String },
-  student: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Student', 
-    required: true 
+  
+  imageUrl: { type: String, default: "" },
+  projectLink: { type: String, default: "" },
+
+  students: {
+    type: [{
+      student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
+      status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' }
+    }],
+    required: true // O projeto precisa ter pelo menos o criador
   },
 
-  // --- DEFINIÇÃO DOS NOVOS CAMPOS NO SCHEMA ---
-  posters: [{
-    url: { type: String },
-    name: { type: String }
-  }],
+  // Ajustando a definição dos arrays de objetos com default vazio
+  posters: {
+    type: [{
+      url: { type: String },
+      name: { type: String }
+    }],
+    default: []
+  },
   
-  files: [{
-    name: { type: String },
-    date: { type: String },
-    base64: { type: String } // Armazenando a string base64 do arquivo
-  }],
+  files: {
+    type: [{
+      name: { type: String },
+      date: { type: String },
+      base64: { type: String }
+    }],
+    default: []
+  },
 
   references: { 
     type: [String], 
