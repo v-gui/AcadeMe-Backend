@@ -90,9 +90,8 @@ app.get('/students/:id', async (req: Request, res: Response) => {
   }
 });
 
-// --- ROTAS DE PROJETOS (AJUSTADAS PARA COLABORADORES) ---
+// --- ROTAS DE PROJETOS ---
 
-// 5. Criar Projeto (O corpo agora deve enviar um array 'students')
 app.post('/projects', async (req: Request, res: Response) => {
   try {
     const project = await Project.create(req.body);
@@ -104,8 +103,8 @@ app.post('/projects', async (req: Request, res: Response) => {
 
 app.get('/projects/:id', async (req: Request, res: Response) => {
   try {
-    // Populamos a lista de alunos para que o frontend saiba quem são os colaboradores
-    const project = await Project.findById(req.params.id).populate('students', 'name profileImage course');
+    // AJUSTE: Como students é um array de objetos {student, status}, o populate deve ser assim:
+    const project = await Project.findById(req.params.id).populate('students.student', 'name profileImage course');
     if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
     res.json(project);
   } catch (error) {
@@ -133,8 +132,7 @@ app.delete('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// 9. LISTAR PROJETOS DE UM ALUNO (Como dono ou colaborador)
-
+// Resposta ao Convite
 app.put('/projects/:projectId/respond-invite', async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params;
@@ -144,7 +142,6 @@ app.put('/projects/:projectId/respond-invite', async (req: Request, res: Respons
       return res.status(400).json({ error: 'Status inválido.' });
     }
 
-    // Atualiza o status do estudante específico dentro do array
     const project = await Project.findOneAndUpdate(
       { _id: projectId, "students.student": studentId },
       { $set: { "students.$.status": status } },
@@ -159,13 +156,13 @@ app.put('/projects/:projectId/respond-invite', async (req: Request, res: Respons
   }
 });
 
-// Ajustado para procurar o ID do aluno dentro do array 'students'
+// 9. LISTAR PROJETOS ACEITOS DO ALUNO
 app.get('/students/:id/projects', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;    
     const projects = await Project.find({
       students: { 
-        $elemMatch: { student: id, status: 'aceito' } 
+        $elemMatch: { student: id, status: 'accepted' } // CORREÇÃO: de 'aceito' para 'accepted'
       }
     }).populate('students.student', 'name course profileImage');
     res.json(projects);
@@ -174,19 +171,18 @@ app.get('/students/:id/projects', async (req: Request, res: Response) => {
   }
 });
 
-// 10. Buscar Convites Pendentes de um Aluno
+// 10. Buscar Convites Pendentes
 app.get('/students/:id/invites', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    // Buscamos projetos onde o aluno está no array 'students' COM status 'pending'
     const invites = await Project.find({
       students: { 
         $elemMatch: { student: id, status: 'pending' } 
       }
     })
-    .populate('students.student', 'name profileImage course') // Traz dados dos outros membros
-    .sort({ createdAt: -1 }); // Convites mais recentes primeiro
+    .populate('students.student', 'name profileImage course')
+    .sort({ createdAt: -1 });
 
     res.json(invites);
   } catch (error) {
@@ -194,7 +190,6 @@ app.get('/students/:id/invites', async (req: Request, res: Response) => {
   }
 });
 
-// Inicia o Servidor
 app.listen(PORT, () => {
   console.log(`🚀 Servidor AcadeMe rodando na porta ${PORT}`);
 });
