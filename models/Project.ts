@@ -17,31 +17,24 @@ export interface IProject extends Document {
 
 const ProjectSchema: Schema = new Schema({
   title: { type: String, required: true },
-  description: { type: String, required: true },
-  
-  // Adicionando default: [] em todos para evitar erros de validação
-  tags: { type: [String], default: [] },
-  
+  description: { type: String, required: true },  
+  tags: { type: [String], default: [] },  
   imageUrl: { type: String, default: "" },
   projectLink: { type: String, default: "" },
-
   students: {
     type: [{
       student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
       status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' }
     }],
     required: true // O projeto precisa ter pelo menos o criador
-  },
-
-  // Ajustando a definição dos arrays de objetos com default vazio
+  },  
   posters: {
     type: [{
       url: { type: String },
       name: { type: String }
     }],
     default: []
-  },
-  
+  },  
   files: {
     type: [{
       name: { type: String },
@@ -54,7 +47,23 @@ const ProjectSchema: Schema = new Schema({
   references: { 
     type: [String], 
     default: [] 
+  },
+
+  endorsements: [{
+  professor: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Professor', 
+    required: true 
+  },
+  comment: { 
+    type: String, 
+    default: '' 
+  },
+  endorsedAt: { 
+    type: Date, 
+    default: Date.now 
   }
+}],
 
 }, {
   timestamps: true
