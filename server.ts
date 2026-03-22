@@ -385,6 +385,58 @@ app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => 
   }
 });
 
+// ==========================================
+// --- GERENCIAMENTO DE CHANCELAS (PROFESSORES) ---
+// ==========================================
+
+// 1. Buscar todos os projetos que um professor validou (Para o ProfileProf)
+app.get('/professors/:id/projects', async (req: Request, res: Response) => {
+  try {
+    const projects = await Project.find({ "endorsements.professor": req.params.id })
+      .populate('students.student', 'name course profileImage');
+    res.json(projects);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar projetos validados.' });
+  }
+});
+
+// 2. Editar o comentário da validação
+app.put('/projects/:projectId/endorse/:professorId', async (req: Request, res: Response) => {
+  try {
+    const { projectId, professorId } = req.params;
+    const { comment } = req.body;
+
+    const project = await Project.findOneAndUpdate(
+      { _id: projectId, "endorsements.professor": professorId },
+      { $set: { "endorsements.$.comment": comment } },
+      { new: true }
+    ).populate('endorsements.professor', 'name profileImage academicTitle department');
+
+    if (!project) return res.status(404).json({ error: 'Validação não encontrada.' });
+    res.json({ message: 'Parecer atualizado com sucesso!', project });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao atualizar parecer.' });
+  }
+});
+
+// 3. Remover a validação (Excluir)
+app.delete('/projects/:projectId/endorse/:professorId', async (req: Request, res: Response) => {
+  try {
+    const { projectId, professorId } = req.params;
+
+    const project = await Project.findByIdAndUpdate(
+      projectId,
+      { $pull: { endorsements: { professor: professorId } } },
+      { new: true }
+    ).populate('endorsements.professor', 'name profileImage academicTitle department');
+
+    if (!project) return res.status(404).json({ error: 'Projeto não encontrado.' });
+    res.json({ message: 'Chancelamento removido com sucesso!', project });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao remover validação.' });
+  }
+});
+
 // --- INICIAR SERVIDOR ---
 app.listen(PORT, () => {
   console.log(`🚀 Servidor AcadeMe rodando na porta ${PORT}`);
