@@ -385,6 +385,25 @@ app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => 
   }
 });
 
+// Vitrine: Listar apenas projetos que foram validados/chancelados por professores
+app.get('/projects-endorsed', async (req: Request, res: Response) => {
+  try {
+    // Busca projetos onde o array de 'endorsements' tem tamanho maior que 0
+    const endorsedProjects = await Project.find({ 
+      "endorsements.0": { $exists: true } 
+    })
+    .populate('students.student', 'name profileImage course')
+    .populate('endorsements.professor', 'name academicTitle') // Traz o nome do professor para exibir o crédito
+    .sort({ createdAt: -1 }) // Traz os mais recentes primeiro
+    .limit(6); // Limita a 6 projetos para a vitrine da Home não ficar gigante
+
+    res.json(endorsedProjects);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao carregar projetos chancelados' });
+  }
+});
+
 // ==========================================
 // --- GERENCIAMENTO DE CHANCELAS (PROFESSORES) ---
 // ==========================================
