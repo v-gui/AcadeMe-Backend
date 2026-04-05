@@ -247,6 +247,15 @@ app.post('/professors', async (req: Request, res: Response) => {
 });
 
 // Buscar um Professor Específico
+app.get('/professors', async (req: Request, res: Response) => {
+  try {
+    const professors = await Professor.find().select('-password');
+    res.json(professors);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar professores.' });
+  }
+});
+
 app.get('/professors/:id', async (req: Request, res: Response) => {
   try {
     const professor = await Professor.findById(req.params.id).select('-password');
@@ -261,6 +270,25 @@ app.get('/professors/:id', async (req: Request, res: Response) => {
 });
 
 // Atualizar Professor
+app.get('/professors/:id/invites', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const invites = await Project.find({
+      invitedProfessors: {
+        $elemMatch: { professor: id, status: 'pending' }
+      }
+    })
+      .populate('students.student', 'name profileImage course')
+      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
+      .sort({ createdAt: -1 });
+
+    res.json(invites);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar convites de validação.' });
+  }
+});
+
 app.put('/professors/:id', async (req: Request, res: Response) => {
   try {
     const updatedProfessor = await Professor.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -295,6 +323,7 @@ app.get('/projects/:id', async (req: Request, res: Response) => {
   try {   
     const project = await Project.findById(req.params.id)
       .populate('students.student', 'name profileImage course')
+      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
       .populate('endorsements.professor', 'name profileImage academicTitle department');
       
     if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
@@ -349,6 +378,79 @@ app.put('/projects/:projectId/respond-invite', async (req: Request, res: Respons
   }
 });
 
+app.put('/projects/:projectId/respond-professor-invite', async (req: Request, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { professorId, status } = req.body;
+
+    if (!['accepted', 'declined'].includes(status)) {
+      return res.status(400).json({ error: 'Status inválido.' });
+    }
+
+    const project = await Project.findOneAndUpdate(
+      { _id: projectId, "invitedProfessors.professor": professorId },
+      { $set: { "invitedProfessors.$.status": status } },
+      { new: true }
+    )
+      .populate('students.student', 'name profileImage course')
+      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
+      .populate('endorsements.professor', 'name profileImage academicTitle department');
+
+    if (!project) return res.status(404).json({ error: 'Projeto ou convite não encontrado.' });
+    res.json({ message: `Convite ${status === 'accepted' ? 'aceito' : 'recusado'}!`, project });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao processar resposta do convite docente.' });
+  }
+});
+
+// Aluno se desvincula da equipe de um projeto
+app.put('/projects/:projectId/leave', async (req: Request, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { studentId } = req.body;
+
+    if (!studentId) {
+      return res.status(400).json({ error: 'Aluno não informado.' });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Projeto não encontrado.' });
+    }
+
+    const member = project.students.find(
+      (item: any) => item.student.toString() === studentId
+    );
+
+    if (!member || member.status !== 'accepted') {
+      return res.status(404).json({ error: 'Aluno não faz parte da equipe deste projeto.' });
+    }
+
+    const acceptedMembersCount = project.students.filter(
+      (item: any) => item.status === 'accepted'
+    ).length;
+
+    if (acceptedMembersCount <= 1) {
+      return res.status(400).json({ error: 'O último membro aceito não pode sair do projeto.' });
+    }
+
+    project.students = project.students.filter(
+      (item: any) => item.student.toString() !== studentId
+    ) as any;
+
+    await project.save();
+
+    const updatedProject = await Project.findById(projectId)
+      .populate('students.student', 'name profileImage course')
+      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
+      .populate('endorsements.professor', 'name profileImage academicTitle department');
+
+    res.json({ message: 'Você saiu da equipe com sucesso.', project: updatedProject });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao sair da equipe do projeto.' });
+  }
+});
+
 // Validar / Endossar Projeto (Ação exclusiva de Professor)
 app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => {
   try {
@@ -361,6 +463,14 @@ app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => 
     }
 
     // Regra: Professor não pode validar o mesmo projeto mais de uma vez
+    const isInvitedProfessor = project.invitedProfessors?.some(
+      (invite: any) => invite.professor.toString() === professorId && invite.status === 'accepted'
+    );
+
+    if (!isInvitedProfessor) {
+      return res.status(403).json({ error: 'Apenas professores convidados e confirmados podem validar este projeto.' });
+    }
+
     const alreadyEndorsed = project.endorsements.some(
       (end: any) => end.professor.toString() === professorId
     );
@@ -378,7 +488,12 @@ app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => 
 
     await project.save();
 
-    res.json({ message: 'Projeto validado com sucesso!', project });
+    const updatedProject = await Project.findById(projectId)
+      .populate('students.student', 'name profileImage course')
+      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
+      .populate('endorsements.professor', 'name profileImage academicTitle department');
+
+    res.json({ message: 'Projeto validado com sucesso!', project: updatedProject });
   } catch (error) {
     console.error('Erro ao validar projeto:', error);
     res.status(500).json({ error: 'Erro interno ao validar o projeto.' });
@@ -429,7 +544,10 @@ app.put('/projects/:projectId/endorse/:professorId', async (req: Request, res: R
       { _id: projectId, "endorsements.professor": professorId },
       { $set: { "endorsements.$.comment": comment } },
       { new: true }
-    ).populate('endorsements.professor', 'name profileImage academicTitle department');
+    )
+      .populate('students.student', 'name profileImage course')
+      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
+      .populate('endorsements.professor', 'name profileImage academicTitle department');
 
     if (!project) return res.status(404).json({ error: 'Validação não encontrada.' });
     res.json({ message: 'Parecer atualizado com sucesso!', project });
@@ -447,7 +565,10 @@ app.delete('/projects/:projectId/endorse/:professorId', async (req: Request, res
       projectId,
       { $pull: { endorsements: { professor: professorId } } },
       { new: true }
-    ).populate('endorsements.professor', 'name profileImage academicTitle department');
+    )
+      .populate('students.student', 'name profileImage course')
+      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
+      .populate('endorsements.professor', 'name profileImage academicTitle department');
 
     if (!project) return res.status(404).json({ error: 'Projeto não encontrado.' });
     res.json({ message: 'Chancelamento removido com sucesso!', project });

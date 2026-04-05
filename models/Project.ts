@@ -10,9 +10,18 @@ export interface IProject extends Document {
     student: mongoose.Types.ObjectId; 
     status: 'pending' | 'accepted' | 'declined';
   }[];
+  invitedProfessors: {
+    professor: mongoose.Types.ObjectId;
+    status: 'pending' | 'accepted' | 'declined';
+  }[];
   posters: { url: string; name: string }[];
   files: { name: string; date: string; base64?: string }[];
   references: string[];
+  endorsements: {
+    professor: mongoose.Types.ObjectId;
+    comment: string;
+    endorsedAt: Date;
+  }[];
 }
 
 const ProjectSchema: Schema = new Schema({
@@ -27,7 +36,14 @@ const ProjectSchema: Schema = new Schema({
       status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' }
     }],
     required: true // O projeto precisa ter pelo menos o criador
-  },  
+  },
+  invitedProfessors: {
+    type: [{
+      professor: { type: mongoose.Schema.Types.ObjectId, ref: 'Professor', required: true },
+      status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' }
+    }],
+    default: []
+  },
   posters: {
     type: [{
       url: { type: String },
