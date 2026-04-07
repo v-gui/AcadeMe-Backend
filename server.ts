@@ -14,6 +14,16 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const countAcceptedMembers = (students: Array<{ status?: string }> = []) =>
+  students.filter((item) => item.status === 'accepted').length;
+
+const normalizeStudentId = (student: any) => {
+  if (!student) return '';
+  if (typeof student === 'string') return student;
+  if (typeof student === 'object' && student._id) return student._id.toString();
+  return student.toString();
+};
+
 // Lista de sites permitidos a se conectar com nosso backend
 const allowedOrigins = [
   'http://localhost:3000',
@@ -336,6 +346,29 @@ app.get('/projects/:id', async (req: Request, res: Response) => {
 // Atualizar Projeto
 app.put('/projects/:id', async (req: Request, res: Response) => {
   try {
+    const existingProject = await Project.findById(req.params.id);
+    if (!existingProject) return res.status(404).json({ error: 'Projeto nÃ£o encontrado' });
+
+    if (Array.isArray(req.body.students)) {
+      const currentAcceptedMemberIds = existingProject.students
+        .filter((member: any) => member.status === 'accepted')
+        .map((member: any) => member.student.toString());
+
+      const nextAcceptedMemberIds = req.body.students
+        .filter((member: any) => member?.status === 'accepted')
+        .map((member: any) => normalizeStudentId(member.student));
+
+      const removedAcceptedMembers = currentAcceptedMemberIds.filter(
+        (studentId) => !nextAcceptedMemberIds.includes(studentId)
+      );
+
+      if (removedAcceptedMembers.length > 0) {
+        return res.status(400).json({
+          error: 'Membros aceitos nao podem ser removidos pela edicao do projeto. Cada integrante deve sair pelo proprio projeto.'
+        });
+      }
+    }
+
     const updatedProject = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!updatedProject) return res.status(404).json({ error: 'Projeto não encontrado' });
     res.json(updatedProject);
@@ -347,7 +380,18 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
 // Excluir Projeto
 app.delete('/projects/:id', async (req: Request, res: Response) => {
   try {
-    const deletedProject = await Project.findByIdAndDelete(req.params.id);
+    const project = await Project.findById(req.params.id);
+    const deletedProject = project;
+
+    if (deletedProject && countAcceptedMembers(deletedProject.students) > 1) {
+      return res.status(400).json({
+        error: 'Projetos com mais de um membro aceito nao podem ser excluidos. Os integrantes devem sair do projeto ate restar apenas uma pessoa.'
+      });
+    }
+
+    if (deletedProject) {
+      await Project.findByIdAndDelete(req.params.id);
+    }
     if (!deletedProject) return res.status(404).json({ error: 'Projeto não encontrado' });
     res.json({ message: 'Projeto excluído com sucesso!' });
   } catch (error) {
