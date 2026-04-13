@@ -24,6 +24,66 @@ const normalizeStudentId = (student: any) => {
   return student.toString();
 };
 
+const getViewerFromQuery = (req: Request) => {
+  const viewerId = typeof req.query.viewerId === 'string' ? req.query.viewerId : '';
+  const viewerRole = typeof req.query.viewerRole === 'string' ? req.query.viewerRole : '';
+
+  return { viewerId, viewerRole };
+};
+
+const getProjectVisibilityFilter = (viewerId?: string, viewerRole?: string) => {
+  const visibilityFilter: any[] = [{ "endorsements.0": { $exists: true } }];
+
+  if (viewerId && viewerRole === 'student') {
+    visibilityFilter.push({
+      students: {
+        $elemMatch: {
+          student: viewerId,
+          status: { $ne: 'declined' }
+        }
+      }
+    });
+  }
+
+  if (viewerId && viewerRole === 'professor') {
+    visibilityFilter.push({
+      invitedProfessors: {
+        $elemMatch: {
+          professor: viewerId,
+          status: { $ne: 'declined' }
+        }
+      }
+    });
+  }
+
+  return { $or: visibilityFilter };
+};
+
+const canViewerAccessProject = (project: any, viewerId?: string, viewerRole?: string) => {
+  if (project?.endorsements?.length > 0) return true;
+  if (!viewerId) return false;
+
+  if (viewerRole === 'student') {
+    return project.students?.some((member: any) => (
+      member.status !== 'declined' &&
+      normalizeStudentId(member.student) === viewerId
+    ));
+  }
+
+  if (viewerRole === 'professor') {
+    return project.invitedProfessors?.some((invite: any) => {
+      const professor = invite.professor;
+      const professorId = typeof professor === 'object' && professor?._id
+        ? professor._id.toString()
+        : professor?.toString();
+
+      return invite.status !== 'declined' && professorId === viewerId;
+    });
+  }
+
+  return false;
+};
+
 // Lista de sites permitidos a se conectar com nosso backend
 const allowedOrigins = [
   'http://localhost:3000',
@@ -96,6 +156,7 @@ app.post('/login', async (req: Request, res: Response) => {
 app.get('/search', async (req: Request, res: Response) => {
   try {
     const { q } = req.query;
+    const { viewerId, viewerRole } = getViewerFromQuery(req);
 
     // Se o termo for vazio, não faz a busca
     if (!q || typeof q !== 'string') {
@@ -115,7 +176,10 @@ app.get('/search', async (req: Request, res: Response) => {
     }).select('-password').limit(5);
 
     const projectsPromise = Project.find({
-      $or: [{ title: searchRegex }, { tags: searchRegex }]
+      $and: [
+        { $or: [{ title: searchRegex }, { tags: searchRegex }] },
+        getProjectVisibilityFilter(viewerId, viewerRole)
+      ]
     }).populate('students.student', 'name profileImage').limit(5);
 
     // Dispara todas as buscas ao mesmo tempo para ser mais rápido
@@ -187,11 +251,17 @@ app.get('/students/:id', async (req: Request, res: Response) => {
 // Listar Projetos Aceitos de um Aluno Específico
 app.get('/students/:id/projects', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;    
+    const { id } = req.params;
+    const { viewerId, viewerRole } = getViewerFromQuery(req);
     const projects = await Project.find({
-      students: { 
-        $elemMatch: { student: id, status: 'accepted' } 
-      }
+      $and: [
+        {
+          students: {
+            $elemMatch: { student: id, status: 'accepted' }
+          }
+        },
+        getProjectVisibilityFilter(viewerId, viewerRole)
+      ]
     }).populate('students.student', 'name course profileImage');
     res.json(projects);
   } catch (error) {
@@ -221,6 +291,7 @@ app.get('/students/:id/invites', async (req: Request, res: Response) => {
 app.get('/students-active', async (req: Request, res: Response) => {
   try {
     const result = await Project.aggregate([
+      { $match: { 'endorsements.0': { $exists: true } } },
       { $unwind: '$students' }, 
       { $match: { 'students.status': 'accepted' } }, 
       { $group: { _id: '$students.student' } } 
@@ -331,12 +402,17 @@ app.post('/projects', async (req: Request, res: Response) => {
 // Buscar Projeto Específico (Popula os Alunos e os Professores que endossaram)
 app.get('/projects/:id', async (req: Request, res: Response) => {
   try {   
+    const { viewerId, viewerRole } = getViewerFromQuery(req);
     const project = await Project.findById(req.params.id)
       .populate('students.student', 'name profileImage course')
       .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
       .populate('endorsements.professor', 'name profileImage academicTitle department');
       
     if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
+    if (!canViewerAccessProject(project, viewerId, viewerRole)) {
+      return res.status(403).json({ error: 'Este projeto ainda aguarda validação docente.' });
+    }
+
     res.json(project);
   } catch (error) {
     res.status(500).json({ error: 'Erro ao buscar projeto' });
