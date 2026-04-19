@@ -24,6 +24,19 @@ const normalizeStudentId = (student: any) => {
   return student.toString();
 };
 
+const normalizeProfessorId = (professor: any) => {
+  if (!professor) return '';
+  if (typeof professor === 'string') return professor;
+  if (typeof professor === 'object' && professor._id) return professor._id.toString();
+  return professor.toString();
+};
+
+const populateProjectById = (projectId: string) =>
+  Project.findById(projectId)
+    .populate('students.student', 'name profileImage course')
+    .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
+    .populate('endorsements.professor', 'name profileImage academicTitle department');
+
 const getViewerFromQuery = (req: Request) => {
   const viewerId = typeof req.query.viewerId === 'string' ? req.query.viewerId : '';
   const viewerRole = typeof req.query.viewerRole === 'string' ? req.query.viewerRole : '';
@@ -445,6 +458,25 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
       }
     }
 
+    if (Array.isArray(req.body.invitedProfessors)) {
+      const currentProfessorIds = existingProject.invitedProfessors
+        .map((invite: any) => invite.professor.toString());
+
+      const nextProfessorIds = req.body.invitedProfessors
+        .map((invite: any) => normalizeProfessorId(invite.professor))
+        .filter(Boolean);
+
+      const removedProfessorIds = currentProfessorIds.filter(
+        (professorId) => !nextProfessorIds.includes(professorId)
+      );
+
+      if (removedProfessorIds.length > 0) {
+        req.body.endorsements = existingProject.endorsements.filter(
+          (endorsement: any) => !removedProfessorIds.includes(endorsement.professor.toString())
+        );
+      }
+    }
+
     const updatedProject = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (!updatedProject) return res.status(404).json({ error: 'Projeto não encontrado' });
     res.json(updatedProject);
@@ -520,6 +552,57 @@ app.put('/projects/:projectId/respond-professor-invite', async (req: Request, re
     res.json({ message: `Convite ${status === 'accepted' ? 'aceito' : 'recusado'}!`, project });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao processar resposta do convite docente.' });
+  }
+});
+
+// Professor se desvincula do projeto, podendo manter ou remover sua validacao
+app.put('/projects/:projectId/professor-leave', async (req: Request, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    const { professorId, keepEndorsement } = req.body;
+
+    if (!professorId) {
+      return res.status(400).json({ error: 'Professor nao informado.' });
+    }
+
+    if (typeof keepEndorsement !== 'boolean') {
+      return res.status(400).json({ error: 'Informe se a validacao deve ser mantida.' });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: 'Projeto nao encontrado.' });
+    }
+
+    const invitedProfessor = project.invitedProfessors.find(
+      (invite: any) => invite.professor.toString() === professorId
+    );
+
+    if (!invitedProfessor) {
+      return res.status(404).json({ error: 'Professor nao faz parte deste projeto.' });
+    }
+
+    project.invitedProfessors = project.invitedProfessors.filter(
+      (invite: any) => invite.professor.toString() !== professorId
+    ) as any;
+
+    if (!keepEndorsement) {
+      project.endorsements = project.endorsements.filter(
+        (endorsement: any) => endorsement.professor.toString() !== professorId
+      ) as any;
+    }
+
+    await project.save();
+
+    const updatedProject = await populateProjectById(projectId.toString());
+    res.json({
+      message: keepEndorsement
+        ? 'Voce saiu do projeto e manteve sua validacao.'
+        : 'Voce saiu do projeto e removeu sua validacao.',
+      project: updatedProject
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao sair do projeto.' });
   }
 });
 
@@ -660,6 +743,17 @@ app.put('/projects/:projectId/endorse/:professorId', async (req: Request, res: R
     const { projectId, professorId } = req.params;
     const { comment } = req.body;
 
+    const existingProject = await Project.findById(projectId);
+    if (!existingProject) return res.status(404).json({ error: 'Projeto nao encontrado.' });
+
+    const isActiveProfessor = existingProject.invitedProfessors.some(
+      (invite: any) => invite.professor.toString() === professorId && invite.status === 'accepted'
+    );
+
+    if (!isActiveProfessor) {
+      return res.status(403).json({ error: 'Apenas docentes ativos no projeto podem editar a validacao.' });
+    }
+
     const project = await Project.findOneAndUpdate(
       { _id: projectId, "endorsements.professor": professorId },
       { $set: { "endorsements.$.comment": comment } },
@@ -680,6 +774,17 @@ app.put('/projects/:projectId/endorse/:professorId', async (req: Request, res: R
 app.delete('/projects/:projectId/endorse/:professorId', async (req: Request, res: Response) => {
   try {
     const { projectId, professorId } = req.params;
+
+    const existingProject = await Project.findById(projectId);
+    if (!existingProject) return res.status(404).json({ error: 'Projeto nao encontrado.' });
+
+    const isActiveProfessor = existingProject.invitedProfessors.some(
+      (invite: any) => invite.professor.toString() === professorId && invite.status === 'accepted'
+    );
+
+    if (!isActiveProfessor) {
+      return res.status(403).json({ error: 'Apenas docentes ativos no projeto podem remover a validacao.' });
+    }
 
     const project = await Project.findByIdAndUpdate(
       projectId,
