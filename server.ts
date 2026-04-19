@@ -17,6 +17,28 @@ const PORT = process.env.PORT || 3001;
 const countAcceptedMembers = (students: Array<{ status?: string }> = []) =>
   students.filter((item) => item.status === 'accepted').length;
 
+const getStudentIdFromMember = (member: any) => normalizeStudentId(member?.student);
+
+const getFirstAcceptedStudentId = (students: Array<{ student?: any; status?: string }> = []) =>
+  students.find((item) => item.status === 'accepted' && getStudentIdFromMember(item))?.student;
+
+const getProjectAdminId = (project: any) => {
+  if (project?.adminStudent) return normalizeStudentId(project.adminStudent);
+  const firstAcceptedStudent = getFirstAcceptedStudentId(project?.students || []);
+  return normalizeStudentId(firstAcceptedStudent);
+};
+
+const isProjectAdmin = (project: any, studentId?: string) =>
+  Boolean(studentId && getProjectAdminId(project) === studentId);
+
+const isAcceptedProjectMemberById = (project: any, studentId?: string) =>
+  Boolean(
+    studentId &&
+    project?.students?.some(
+      (member: any) => member.status === 'accepted' && normalizeStudentId(member.student) === studentId
+    )
+  );
+
 const normalizeStudentId = (student: any) => {
   if (!student) return '';
   if (typeof student === 'string') return student;
@@ -33,6 +55,7 @@ const normalizeProfessorId = (professor: any) => {
 
 const populateProjectById = (projectId: string) =>
   Project.findById(projectId)
+    .populate('adminStudent', 'name profileImage course')
     .populate('students.student', 'name profileImage course')
     .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
     .populate('endorsements.professor', 'name profileImage academicTitle department');
@@ -405,7 +428,8 @@ app.put('/professors/:id', async (req: Request, res: Response) => {
 // Criar novo Projeto
 app.post('/projects', async (req: Request, res: Response) => {
   try {
-    const project = await Project.create(req.body);
+    const adminStudent = req.body.adminStudent || getFirstAcceptedStudentId(req.body.students || []);
+    const project = await Project.create({ ...req.body, adminStudent });
     res.status(201).json(project);
   } catch (error) {
     res.status(400).json({ error: 'Erro ao criar projeto', details: error });
@@ -416,10 +440,7 @@ app.post('/projects', async (req: Request, res: Response) => {
 app.get('/projects/:id', async (req: Request, res: Response) => {
   try {   
     const { viewerId, viewerRole } = getViewerFromQuery(req);
-    const project = await Project.findById(req.params.id)
-      .populate('students.student', 'name profileImage course')
-      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
-      .populate('endorsements.professor', 'name profileImage academicTitle department');
+    const project = await populateProjectById(req.params.id.toString());
       
     if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
     if (!canViewerAccessProject(project, viewerId, viewerRole)) {
@@ -438,6 +459,14 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
     const existingProject = await Project.findById(req.params.id);
     if (!existingProject) return res.status(404).json({ error: 'Projeto nÃ£o encontrado' });
 
+    const requesterStudentId = req.body.requesterStudentId;
+    delete req.body.requesterStudentId;
+    delete req.body.adminStudent;
+
+    if (!isAcceptedProjectMemberById(existingProject, requesterStudentId)) {
+      return res.status(403).json({ error: 'Apenas membros aceitos podem editar o projeto.' });
+    }
+
     if (Array.isArray(req.body.students)) {
       const currentAcceptedMemberIds = existingProject.students
         .filter((member: any) => member.status === 'accepted')
@@ -452,9 +481,20 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
       );
 
       if (removedAcceptedMembers.length > 0) {
-        return res.status(400).json({
-          error: 'Membros aceitos nao podem ser removidos pela edicao do projeto. Cada integrante deve sair pelo proprio projeto.'
-        });
+        if (!isProjectAdmin(existingProject, requesterStudentId)) {
+          return res.status(403).json({
+            error: 'Apenas o admin do projeto pode remover membros aceitos da equipe.'
+          });
+        }
+      }
+
+      if (nextAcceptedMemberIds.length === 0) {
+        return res.status(400).json({ error: 'O projeto precisa manter pelo menos um membro aceito.' });
+      }
+
+      const currentAdminId = getProjectAdminId(existingProject);
+      if (!currentAdminId || !nextAcceptedMemberIds.includes(currentAdminId)) {
+        req.body.adminStudent = nextAcceptedMemberIds[0];
       }
     }
 
@@ -471,6 +511,12 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
       );
 
       if (removedProfessorIds.length > 0) {
+        if (!isProjectAdmin(existingProject, requesterStudentId)) {
+          return res.status(403).json({
+            error: 'Apenas o admin do projeto pode remover docentes convidados.'
+          });
+        }
+
         req.body.endorsements = existingProject.endorsements.filter(
           (endorsement: any) => !removedProfessorIds.includes(endorsement.professor.toString())
         );
@@ -488,8 +534,17 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
 // Excluir Projeto
 app.delete('/projects/:id', async (req: Request, res: Response) => {
   try {
+    const requesterStudentId = typeof req.query.requesterStudentId === 'string'
+      ? req.query.requesterStudentId
+      : req.body?.requesterStudentId;
     const project = await Project.findById(req.params.id);
     const deletedProject = project;
+
+    if (deletedProject && !isProjectAdmin(deletedProject, requesterStudentId)) {
+      return res.status(403).json({
+        error: 'Apenas o admin do projeto pode excluir o projeto.'
+      });
+    }
 
     if (deletedProject && countAcceptedMembers(deletedProject.students) > 1) {
       return res.status(400).json({
@@ -641,12 +696,14 @@ app.put('/projects/:projectId/leave', async (req: Request, res: Response) => {
       (item: any) => item.student.toString() !== studentId
     ) as any;
 
+    if (isProjectAdmin(project, studentId)) {
+      const nextAdminStudent = getFirstAcceptedStudentId(project.students);
+      project.adminStudent = nextAdminStudent as any;
+    }
+
     await project.save();
 
-    const updatedProject = await Project.findById(projectId)
-      .populate('students.student', 'name profileImage course')
-      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
-      .populate('endorsements.professor', 'name profileImage academicTitle department');
+    const updatedProject = await populateProjectById(projectId.toString());
 
     res.json({ message: 'Você saiu da equipe com sucesso.', project: updatedProject });
   } catch (error) {
