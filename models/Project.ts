@@ -6,6 +6,7 @@ export interface IProject extends Document {
   tags: string[];
   imageUrl?: string;
   projectLink?: string;
+  adminStudent?: mongoose.Types.ObjectId;
   students: { 
     student: mongoose.Types.ObjectId; 
     status: 'pending' | 'accepted' | 'declined';
@@ -30,6 +31,7 @@ const ProjectSchema: Schema = new Schema({
   tags: { type: [String], default: [] },  
   imageUrl: { type: String, default: "" },
   projectLink: { type: String, default: "" },
+  adminStudent: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' },
   students: {
     type: [{
       student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
