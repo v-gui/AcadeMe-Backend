@@ -7,8 +7,8 @@ export interface IProject extends Document {
   imageUrl?: string;
   projectLink?: string;
   adminStudent?: mongoose.Types.ObjectId;
-  students: { 
-    student: mongoose.Types.ObjectId; 
+  students: {
+    student: mongoose.Types.ObjectId;
     status: 'pending' | 'accepted' | 'declined';
   }[];
   invitedProfessors: {
@@ -37,7 +37,7 @@ const ProjectSchema: Schema = new Schema({
       student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
       status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' }
     }],
-    required: true // O projeto precisa ter pelo menos o criador
+    required: true
   },
   invitedProfessors: {
     type: [{
