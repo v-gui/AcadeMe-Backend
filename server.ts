@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 
 import Student from './models/Student';
@@ -13,6 +15,143 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const TOKEN_EXPIRATION_MS = 1000 * 60 * 60 * 24;
+const RESET_TOKEN_EXPIRATION_MS = 1000 * 60 * 30;
+const privateUserFields = '-password -emailVerificationToken -emailVerificationExpires -resetPasswordToken -resetPasswordExpires';
+
+const getBaseAppUrl = () => FRONTEND_URL.replace(/\/$/, '');
+
+const createToken = () => crypto.randomBytes(32).toString('hex');
+
+const sanitizeUser = (user: any, role: string) => {
+  const {
+    password: _password,
+    emailVerificationToken: _emailVerificationToken,
+    emailVerificationExpires: _emailVerificationExpires,
+    resetPasswordToken: _resetPasswordToken,
+    resetPasswordExpires: _resetPasswordExpires,
+    ...userData
+  } = user.toObject();
+
+  return { ...userData, role };
+};
+
+const createMailTransport = () => {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  if (!host || !user || !pass) {
+    throw new Error('SMTP não configurado. Defina SMTP_HOST, SMTP_PORT, SMTP_USER e SMTP_PASS.');
+  }
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass }
+  });
+};
+
+const sendEmail = async (to: string, subject: string, html: string) => {
+  const transporter = createMailTransport();
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+
+  await transporter.sendMail({
+    from,
+    to,
+    subject,
+    html
+  });
+};
+
+const buildEmailShell = (title: string, message: string, ctaLabel: string, ctaUrl: string) => `
+  <div style="font-family: Arial, sans-serif; background: #f4f8fc; padding: 32px;">
+    <div style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 24px; padding: 32px; border: 1px solid #e6eef8;">
+      <div style="margin-bottom: 24px;">
+        <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: #006acb;">AcadeMe</div>
+        <h1 style="margin: 12px 0 0; color: #003465;">${title}</h1>
+      </div>
+      <p style="font-size: 16px; line-height: 1.6; color: #35516f;">${message}</p>
+      <a href="${ctaUrl}" style="display: inline-block; margin-top: 24px; background: linear-gradient(135deg, #006acb, #003465); color: #ffffff; text-decoration: none; font-weight: 700; padding: 14px 22px; border-radius: 999px;">
+        ${ctaLabel}
+      </a>
+      <p style="margin-top: 24px; font-size: 12px; line-height: 1.6; color: #6c8299;">Se o botão não funcionar, copie e cole este link no navegador:<br />${ctaUrl}</p>
+    </div>
+  </div>
+`;
+
+const sendVerificationEmail = async (email: string, token: string) => {
+  const verificationUrl = `${getBaseAppUrl()}/verify-email?token=${token}`;
+  const html = buildEmailShell(
+    'Confirme sua conta',
+    'Para concluir seu cadastro no AcadeMe, confirme seu e-mail pelo botão abaixo.',
+    'Confirmar e-mail',
+    verificationUrl
+  );
+
+  await sendEmail(email, 'Confirme seu cadastro no AcadeMe', html);
+};
+
+const sendResetPasswordEmail = async (email: string, token: string) => {
+  const resetUrl = `${getBaseAppUrl()}/reset-password?token=${token}`;
+  const html = buildEmailShell(
+    'Redefina sua senha',
+    'Recebemos uma solicitação para alterar sua senha. Se foi você, use o botão abaixo.',
+    'Criar nova senha',
+    resetUrl
+  );
+
+  await sendEmail(email, 'Redefinição de senha no AcadeMe', html);
+};
+
+const findAuthUserByEmail = async (email: string) => {
+  let user: any = await Student.findOne({ email });
+  let role = 'student';
+
+  if (!user) {
+    user = await Professor.findOne({ email });
+    role = 'professor';
+  }
+
+  return { user, role };
+};
+
+const findAuthUserByVerificationToken = async (token: string) => {
+  const query = {
+    emailVerificationToken: token,
+    emailVerificationExpires: { $gt: new Date() }
+  };
+
+  let user: any = await Student.findOne(query);
+  let role = 'student';
+
+  if (!user) {
+    user = await Professor.findOne(query);
+    role = 'professor';
+  }
+
+  return { user, role };
+};
+
+const findAuthUserByResetToken = async (token: string) => {
+  const query = {
+    resetPasswordToken: token,
+    resetPasswordExpires: { $gt: new Date() }
+  };
+
+  let user: any = await Student.findOne(query);
+  let role = 'student';
+
+  if (!user) {
+    user = await Professor.findOne(query);
+    role = 'professor';
+  }
+
+  return { user, role };
+};
 
 const countAcceptedMembers = (students: Array<{ status?: string }> = []) =>
   students.filter((item) => item.status === 'accepted').length;
@@ -135,6 +274,294 @@ app.use(cors({
 
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+const shadowAuthRoutes = () => {
+  app.post('/login', async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      const { user, role } = await findAuthUserByEmail(email);
+
+      if (!user) {
+        return res.status(404).json({ error: 'UsuÃ¡rio nÃ£o encontrado.' });
+      }
+
+      if (!user.emailVerified) {
+        return res.status(403).json({ error: 'Confirme seu e-mail antes de entrar na plataforma.' });
+      }
+
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Senha incorreta.' });
+      }
+
+      return res.json({
+        message: 'Login realizado com sucesso!',
+        user: sanitizeUser(user, role)
+      });
+    } catch (error) {
+      console.error('Erro no login universal:', error);
+      return res.status(500).json({ error: 'Erro interno no servidor' });
+    }
+  });
+
+  app.get('/auth/verify-email', async (req: Request, res: Response) => {
+    try {
+      const token = typeof req.query.token === 'string' ? req.query.token : '';
+
+      if (!token) {
+        return res.status(400).json({ error: 'Token de verificação inválido.' });
+      }
+
+      const { user } = await findAuthUserByVerificationToken(token);
+
+      if (!user) {
+        return res.status(400).json({ error: 'Token de verificação inválido ou expirado.' });
+      }
+
+      user.emailVerified = true;
+      user.emailVerificationToken = null;
+      user.emailVerificationExpires = null;
+      await user.save();
+
+      return res.json({ message: 'E-mail confirmado com sucesso.' });
+    } catch (error) {
+      console.error('Erro ao confirmar e-mail:', error);
+      return res.status(500).json({ error: 'Erro interno no servidor.' });
+    }
+  });
+
+  app.post('/auth/forgot-password', async (req: Request, res: Response) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ error: 'Informe um e-mail para continuar.' });
+      }
+
+      const { user } = await findAuthUserByEmail(email);
+
+      if (user) {
+        user.resetPasswordToken = createToken();
+        user.resetPasswordExpires = new Date(Date.now() + RESET_TOKEN_EXPIRATION_MS);
+        await user.save();
+        await sendResetPasswordEmail(email, user.resetPasswordToken);
+      }
+
+      return res.json({
+        message: 'Se o e-mail estiver cadastrado, enviaremos um link para redefinir a senha.'
+      });
+    } catch (error) {
+      console.error('Erro ao solicitar redefinição de senha:', error);
+      return res.status(500).json({ error: 'Não foi possível enviar o e-mail de redefinição.' });
+    }
+  });
+
+  app.post('/auth/reset-password', async (req: Request, res: Response) => {
+    try {
+      const { token, password } = req.body;
+
+      if (!token || !password) {
+        return res.status(400).json({ error: 'Token e nova senha são obrigatórios.' });
+      }
+
+      const { user } = await findAuthUserByResetToken(token);
+
+      if (!user) {
+        return res.status(400).json({ error: 'Token de redefinição inválido ou expirado.' });
+      }
+
+      user.password = password;
+      user.resetPasswordToken = null;
+      user.resetPasswordExpires = null;
+      await user.save();
+
+      return res.json({ message: 'Senha atualizada com sucesso.' });
+    } catch (error) {
+      console.error('Erro ao redefinir senha:', error);
+      return res.status(500).json({ error: 'Não foi possível redefinir a senha.' });
+    }
+  });
+
+  app.get('/search', async (req: Request, res: Response) => {
+    try {
+      const { q } = req.query;
+      const { viewerId, viewerRole } = getViewerFromQuery(req);
+
+      if (!q || typeof q !== 'string') {
+        return res.json({ students: [], projects: [], professors: [] });
+      }
+
+      const searchRegex = new RegExp(q, 'i');
+
+      const studentsPromise = Student.find({
+        $or: [{ name: searchRegex }, { course: searchRegex }]
+      }).select(privateUserFields).limit(5);
+
+      const professorsPromise = Professor.find({
+        $or: [{ name: searchRegex }, { department: searchRegex }]
+      }).select(privateUserFields).limit(5);
+
+      const projectsPromise = Project.find({
+        $and: [
+          { $or: [{ title: searchRegex }, { tags: searchRegex }] },
+          getProjectVisibilityFilter(viewerId, viewerRole)
+        ]
+      }).populate('students.student', 'name profileImage').limit(5);
+
+      const [students, professors, projects] = await Promise.all([
+        studentsPromise,
+        professorsPromise,
+        projectsPromise
+      ]);
+
+      return res.json({ students, professors, projects });
+    } catch (error) {
+      console.error('Erro na busca global:', error);
+      return res.status(500).json({ error: 'Erro ao realizar a busca.' });
+    }
+  });
+
+  app.post('/students', async (req: Request, res: Response) => {
+    try {
+      const verificationToken = createToken();
+      const student = new Student({
+        ...req.body,
+        emailVerified: false,
+        emailVerificationToken: verificationToken,
+        emailVerificationExpires: new Date(Date.now() + TOKEN_EXPIRATION_MS)
+      });
+
+      await student.save();
+
+      try {
+        await sendVerificationEmail(student.email, verificationToken);
+      } catch (error) {
+        await Student.findByIdAndDelete(student._id);
+        throw error;
+      }
+
+      return res.status(201).json({
+        message: 'Cadastro criado. Enviamos um e-mail de confirmação para ativar sua conta.'
+      });
+    } catch (error) {
+      console.error('Erro ao criar aluno:', error);
+      return res.status(400).json({ error: 'Erro ao criar aluno. Verifique se o e-mail já existe ou se o SMTP foi configurado.' });
+    }
+  });
+
+  app.put('/students/:id', async (req: Request, res: Response) => {
+    try {
+      const updatedStudent = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true });
+      if (!updatedStudent) return res.status(404).json({ error: 'Aluno nÃ£o encontrado.' });
+      return res.json(sanitizeUser(updatedStudent, 'student'));
+    } catch (error) {
+      return res.status(500).json({ error: 'Erro ao atualizar dados do perfil.' });
+    }
+  });
+
+  app.get('/students', async (_req: Request, res: Response) => {
+    try {
+      const students = await Student.find().select(privateUserFields);
+      return res.json(students);
+    } catch (error) {
+      return res.status(500).json({ error: 'Erro ao buscar alunos' });
+    }
+  });
+
+  app.get('/students/:id', async (req: Request, res: Response) => {
+    try {
+      const student = await Student.findById(req.params.id).select(privateUserFields);
+      if (!student) return res.status(404).json({ error: 'Aluno nÃ£o encontrado.' });
+      return res.json(student);
+    } catch (error) {
+      return res.status(500).json({ error: 'Erro ao buscar dados do perfil do aluno.' });
+    }
+  });
+
+  app.get('/students-active', async (_req: Request, res: Response) => {
+    try {
+      const result = await Project.aggregate([
+        { $match: { 'endorsements.0': { $exists: true } } },
+        { $unwind: '$students' },
+        { $match: { 'students.status': 'accepted' } },
+        { $group: { _id: '$students.student' } }
+      ]);
+
+      const activeStudentIds = result.map(item => item._id);
+      const activeStudents = await Student.find({ _id: { $in: activeStudentIds } }).select(privateUserFields);
+
+      return res.json(activeStudents);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Erro ao carregar talentos ativos' });
+    }
+  });
+
+  app.post('/professors', async (req: Request, res: Response) => {
+    try {
+      const verificationToken = createToken();
+      const professor = new Professor({
+        ...req.body,
+        emailVerified: false,
+        emailVerificationToken: verificationToken,
+        emailVerificationExpires: new Date(Date.now() + TOKEN_EXPIRATION_MS)
+      });
+
+      await professor.save();
+
+      try {
+        await sendVerificationEmail(professor.email, verificationToken);
+      } catch (error) {
+        await Professor.findByIdAndDelete(professor._id);
+        throw error;
+      }
+
+      return res.status(201).json({
+        message: 'Cadastro criado. Enviamos um e-mail de confirmação para ativar sua conta.'
+      });
+    } catch (error) {
+      console.error('Erro no cadastro de professor:', error);
+      return res.status(400).json({ error: 'Erro ao cadastrar professor. Verifique o e-mail informado e a configuração do SMTP.' });
+    }
+  });
+
+  app.get('/professors', async (_req: Request, res: Response) => {
+    try {
+      const professors = await Professor.find().select(privateUserFields);
+      return res.json(professors);
+    } catch (error) {
+      return res.status(500).json({ error: 'Erro ao buscar professores.' });
+    }
+  });
+
+  app.get('/professors/:id', async (req: Request, res: Response) => {
+    try {
+      const professor = await Professor.findById(req.params.id).select(privateUserFields);
+      if (!professor) {
+        return res.status(404).json({ error: 'Professor nÃ£o encontrado.' });
+      }
+      return res.json(professor);
+    } catch (error) {
+      console.error('Erro ao buscar professor:', error);
+      return res.status(500).json({ error: 'Erro ao buscar dados do perfil do professor.' });
+    }
+  });
+
+  app.put('/professors/:id', async (req: Request, res: Response) => {
+    try {
+      const updatedProfessor = await Professor.findByIdAndUpdate(req.params.id, req.body, { new: true });
+      if (!updatedProfessor) {
+        return res.status(404).json({ error: 'Professor nÃ£o encontrado.' });
+      }
+      return res.json(sanitizeUser(updatedProfessor, 'professor'));
+    } catch (error) {
+      console.error('Erro ao atualizar professor:', error);
+      return res.status(500).json({ error: 'Erro ao atualizar dados do perfil.' });
+    }
+  });
+};
+
+shadowAuthRoutes();
 
 
 mongoose.connect(process.env.MONGO_URI as string)

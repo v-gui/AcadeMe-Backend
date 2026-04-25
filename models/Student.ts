@@ -15,7 +15,11 @@ export interface IStudent extends Document {
   contactLink?: string;
   password: string;
   interests: string[];
-  
+  emailVerified: boolean;
+  emailVerificationToken?: string;
+  emailVerificationExpires?: Date;
+  resetPasswordToken?: string;
+  resetPasswordExpires?: Date;
 }
 
 const StudentSchema: Schema = new Schema({
@@ -26,6 +30,11 @@ const StudentSchema: Schema = new Schema({
   profileImage: { type: String },
   contactLink: { type: String },
   password: { type: String, required: true },
+  emailVerified: { type: Boolean, default: false },
+  emailVerificationToken: { type: String, default: null },
+  emailVerificationExpires: { type: Date, default: null },
+  resetPasswordToken: { type: String, default: null },
+  resetPasswordExpires: { type: Date, default: null },
   interests: { 
     type: [String], 
     default: [],

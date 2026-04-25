@@ -11,12 +11,14 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@types/nodemailer": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "mongodb": "^7.1.0",
-    "mongoose": "^8.23.0"
+    "mongoose": "^8.23.0",
+    "nodemailer": "^8.0.6"
   },
   "description": "",
   "devDependencies": {
