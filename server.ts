@@ -4,7 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 
-// Importando os Modelos BD
+
 import Student from './models/Student';
 import Project from './models/Project';
 import Professor from './models/Professor';
@@ -120,58 +120,58 @@ const canViewerAccessProject = (project: any, viewerId?: string, viewerRole?: st
   return false;
 };
 
-// Lista de sites permitidos a se conectar com nosso backend
+
 const allowedOrigins = [
   'http://localhost:3000',
   'https://acade-me-frontend.vercel.app'
 ];
 
-// --- MIDDLEWARES ---
-// Permite que o frontend (React) converse com o backend sem erros de CORS
+
+
 app.use(cors({
   origin: allowedOrigins,
   credentials: true
 }));
-// Aumenta o limite de tamanho para permitir envio de imagens em Base64
+
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- CONEXÃO COM O MONGODB ---
+
 mongoose.connect(process.env.MONGO_URI as string)
   .then(() => console.log('🔥 MongoDB Conectado com Sucesso!'))
   .catch((err) => console.error('Erro ao conectar no Mongo:', err));
 
 
-// ==========================================
-// --- ROTA UNIVERSAL DE LOGIN (ALUNOS E PROFESSORES) ---
-// ==========================================
-// Esta rota verifica se o e-mail pertence a um aluno ou a um professor
+
+
+
+
 app.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
     
-    // 1. Tenta achar na coleção de Alunos
+
     let user: any = await Student.findOne({ email });
     let role = 'student';
 
-    // 2. Se não for aluno, tenta achar na coleção de Professores
+
     if (!user) {
       user = await Professor.findOne({ email });
       role = 'professor';
     }
 
-    // 3. Se não achar em lugar nenhum, barra o acesso
+
     if (!user) {
       return res.status(404).json({ error: 'Usuário não encontrado.' });
     }
 
-    // 4. Verifica se a senha está correta
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ error: 'Senha incorreta.' });
     }
 
-    // 5. Remove a senha dos dados e devolve para o Frontend, incluindo a 'role'
+
     const { password: _, ...userData } = user.toObject();
     res.json({ 
       message: 'Login realizado com sucesso!', 
@@ -185,24 +185,23 @@ app.post('/login', async (req: Request, res: Response) => {
 });
 
 
-// ==========================================
-// --- ROTA DE BUSCA GLOBAL (ALUNOS, PROFESSORES E PROJETOS) ---
-// ==========================================
-// Recebe um termo digitado e procura nas 3 coleções ao mesmo tempo
+
+
+
+
 app.get('/search', async (req: Request, res: Response) => {
   try {
     const { q } = req.query;
     const { viewerId, viewerRole } = getViewerFromQuery(req);
 
-    // Se o termo for vazio, não faz a busca
     if (!q || typeof q !== 'string') {
       return res.json({ students: [], projects: [], professors: [] });
     }
 
-    // Ignora letras maiúsculas/minúsculas na pesquisa
+
     const searchRegex = new RegExp(q, 'i');
 
-    // Monta as promessas de busca (Limitadas a 5 para não pesar o frontend)
+
     const studentsPromise = Student.find({
       $or: [{ name: searchRegex }, { course: searchRegex }]
     }).select('-password').limit(5);
@@ -218,14 +217,14 @@ app.get('/search', async (req: Request, res: Response) => {
       ]
     }).populate('students.student', 'name profileImage').limit(5);
 
-    // Dispara todas as buscas ao mesmo tempo para ser mais rápido
+
     const [students, professors, projects] = await Promise.all([
       studentsPromise, 
       professorsPromise, 
       projectsPromise
     ]);
 
-    // Retorna tudo agrupadinho
+
     res.json({ students, professors, projects });
 
   } catch (error) {
@@ -235,11 +234,11 @@ app.get('/search', async (req: Request, res: Response) => {
 });
 
 
-// ==========================================
-// --- ROTAS DE ALUNOS ---
-// ==========================================
 
-// Criar Aluno (Cadastro)
+
+
+
+
 app.post('/students', async (req: Request, res: Response) => {
   try {
     const student = await Student.create(req.body);
@@ -250,7 +249,7 @@ app.post('/students', async (req: Request, res: Response) => {
   }
 });
 
-// Atualizar Aluno
+
 app.put('/students/:id', async (req: Request, res: Response) => {
   try {
     const updatedStudent = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -263,7 +262,7 @@ app.put('/students/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Listar todos os Alunos
+
 app.get('/students', async (req: Request, res: Response) => {
   try {
     const students = await Student.find().select('-password');
@@ -273,7 +272,7 @@ app.get('/students', async (req: Request, res: Response) => {
   }
 });
 
-// Buscar um Aluno Específico
+
 app.get('/students/:id', async (req: Request, res: Response) => {
   try {
     const student = await Student.findById(req.params.id).select('-password');
@@ -284,7 +283,7 @@ app.get('/students/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Listar Projetos Aceitos de um Aluno Específico
+
 app.get('/students/:id/projects', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -305,7 +304,7 @@ app.get('/students/:id/projects', async (req: Request, res: Response) => {
   }
 });
 
-// Buscar Convites de Projetos Pendentes do Aluno
+
 app.get('/students/:id/invites', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -323,14 +322,14 @@ app.get('/students/:id/invites', async (req: Request, res: Response) => {
   }
 });
 
-// Vitrine: Listar apenas Alunos que já têm projetos aceitos
+
 app.get('/students-active', async (req: Request, res: Response) => {
   try {
     const result = await Project.aggregate([
       { $match: { 'endorsements.0': { $exists: true } } },
-      { $unwind: '$students' }, 
-      { $match: { 'students.status': 'accepted' } }, 
-      { $group: { _id: '$students.student' } } 
+      { $unwind: '$students' },
+      { $match: { 'students.status': 'accepted' } },
+      { $group: { _id: '$students.student' } }
     ]);
 
     const activeStudentIds = result.map(item => item._id);
@@ -347,11 +346,11 @@ app.get('/students-active', async (req: Request, res: Response) => {
 });
 
 
-// ==========================================
-// --- ROTAS DE PROFESSORES ---
-// ==========================================
 
-// Criar Professor (Cadastro)
+
+
+
+
 app.post('/professors', async (req: Request, res: Response) => {
   try {
     const professor = await Professor.create(req.body);
@@ -363,7 +362,7 @@ app.post('/professors', async (req: Request, res: Response) => {
   }
 });
 
-// Buscar um Professor Específico
+
 app.get('/professors', async (req: Request, res: Response) => {
   try {
     const professors = await Professor.find().select('-password');
@@ -386,7 +385,7 @@ app.get('/professors/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Atualizar Professor
+
 app.get('/professors/:id/invites', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -421,11 +420,11 @@ app.put('/professors/:id', async (req: Request, res: Response) => {
 });
 
 
-// ==========================================
-// --- ROTAS DE PROJETOS ---
-// ==========================================
 
-// Criar novo Projeto
+
+
+
+
 app.post('/projects', async (req: Request, res: Response) => {
   try {
     const adminStudent = req.body.adminStudent || getFirstAcceptedStudentId(req.body.students || []);
@@ -436,12 +435,12 @@ app.post('/projects', async (req: Request, res: Response) => {
   }
 });
 
-// Buscar Projeto Específico (Popula os Alunos e os Professores que endossaram)
+
 app.get('/projects/:id', async (req: Request, res: Response) => {
-  try {   
+  try {
     const { viewerId, viewerRole } = getViewerFromQuery(req);
     const project = await populateProjectById(req.params.id.toString());
-      
+
     if (!project) return res.status(404).json({ error: 'Projeto não encontrado' });
     if (!canViewerAccessProject(project, viewerId, viewerRole)) {
       return res.status(403).json({ error: 'Este projeto ainda aguarda validação docente.' });
@@ -453,7 +452,7 @@ app.get('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Atualizar Projeto
+
 app.put('/projects/:id', async (req: Request, res: Response) => {
   try {
     const existingProject = await Project.findById(req.params.id);
@@ -531,7 +530,7 @@ app.put('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Excluir Projeto
+
 app.delete('/projects/:id', async (req: Request, res: Response) => {
   try {
     const requesterStudentId = typeof req.query.requesterStudentId === 'string'
@@ -562,7 +561,7 @@ app.delete('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Resposta ao Convite do Projeto (Aluno Aceita ou Recusa)
+
 app.put('/projects/:projectId/respond-invite', async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params;
@@ -588,29 +587,67 @@ app.put('/projects/:projectId/respond-invite', async (req: Request, res: Respons
 app.put('/projects/:projectId/respond-professor-invite', async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params;
-    const { professorId, status } = req.body;
+    const { professorId, status, comment } = req.body;
+
+    if (!professorId) {
+      return res.status(400).json({ error: 'Professor nao informado.' });
+    }
 
     if (!['accepted', 'declined'].includes(status)) {
       return res.status(400).json({ error: 'Status inválido.' });
     }
 
-    const project = await Project.findOneAndUpdate(
-      { _id: projectId, "invitedProfessors.professor": professorId },
-      { $set: { "invitedProfessors.$.status": status } },
-      { new: true }
-    )
-      .populate('students.student', 'name profileImage course')
-      .populate('invitedProfessors.professor', 'name profileImage academicTitle department')
-      .populate('endorsements.professor', 'name profileImage academicTitle department');
+    const project = await Project.findById(projectId);
 
-    if (!project) return res.status(404).json({ error: 'Projeto ou convite não encontrado.' });
-    res.json({ message: `Convite ${status === 'accepted' ? 'aceito' : 'recusado'}!`, project });
+    if (!project) {
+      return res.status(404).json({ error: 'Projeto ou convite não encontrado.' });
+    }
+
+    const invitedProfessor = project.invitedProfessors.find(
+      (invite: any) => invite.professor.toString() === professorId
+    );
+
+    if (!invitedProfessor) {
+      return res.status(404).json({ error: 'Projeto ou convite não encontrado.' });
+    }
+
+    invitedProfessor.status = status;
+
+    const existingEndorsement = project.endorsements.find(
+      (endorsement: any) => endorsement.professor.toString() === professorId
+    );
+
+    if (status === 'accepted') {
+      if (!existingEndorsement) {
+        project.endorsements.push({
+          professor: professorId,
+          comment: comment || '',
+          endorsedAt: new Date()
+        });
+      } else if (typeof comment === 'string') {
+        existingEndorsement.comment = comment;
+      }
+    }
+
+    if (status === 'declined') {
+      project.endorsements = project.endorsements.filter(
+        (endorsement: any) => endorsement.professor.toString() !== professorId
+      ) as any;
+    }
+
+    await project.save();
+
+    const updatedProject = await populateProjectById(projectId);
+
+    res.json({
+      message: `Convite ${status === 'accepted' ? 'aceito e validado' : 'recusado'}!`,
+      project: updatedProject
+    });
   } catch (error) {
     res.status(500).json({ error: 'Erro ao processar resposta do convite docente.' });
   }
 });
 
-// Professor se desvincula do projeto, podendo manter ou remover sua validacao
 app.put('/projects/:projectId/professor-leave', async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params;
@@ -661,7 +698,6 @@ app.put('/projects/:projectId/professor-leave', async (req: Request, res: Respon
   }
 });
 
-// Aluno se desvincula da equipe de um projeto
 app.put('/projects/:projectId/leave', async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params;
@@ -711,7 +747,7 @@ app.put('/projects/:projectId/leave', async (req: Request, res: Response) => {
   }
 });
 
-// Validar / Endossar Projeto (Ação exclusiva de Professor)
+
 app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => {
   try {
     const { projectId } = req.params;
@@ -722,7 +758,7 @@ app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => 
       return res.status(404).json({ error: 'Projeto não encontrado.' });
     }
 
-    // Regra: Professor não pode validar o mesmo projeto mais de uma vez
+
     const isInvitedProfessor = project.invitedProfessors?.some(
       (invite: any) => invite.professor.toString() === professorId && invite.status === 'accepted'
     );
@@ -739,7 +775,7 @@ app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => 
       return res.status(400).json({ error: 'Você já validou este projeto anteriormente.' });
     }
 
-    // Adiciona o selo de validação
+
     project.endorsements.push({
       professor: professorId,
       comment: comment || '',
@@ -760,17 +796,19 @@ app.post('/projects/:projectId/endorse', async (req: Request, res: Response) => 
   }
 });
 
-// Vitrine: Listar apenas projetos que foram validados/chancelados por professores
+
 app.get('/projects-endorsed', async (req: Request, res: Response) => {
   try {
-    // Busca projetos onde o array de 'endorsements' tem tamanho maior que 0
-    const endorsedProjects = await Project.find({ 
-      "endorsements.0": { $exists: true } 
-    })
-    .populate('students.student', 'name profileImage course')
-    .populate('endorsements.professor', 'name academicTitle') // Traz o nome do professor para exibir o crédito
-    .sort({ createdAt: -1 }) // Traz os mais recentes primeiro
-    .limit(6); // Limita a 6 projetos para a vitrine da Home não ficar gigante
+
+    const sampledProjects = await Project.aggregate([
+      { $match: { "endorsements.0": { $exists: true } } },
+      { $sample: { size: 3 } }
+    ]);
+
+    const endorsedProjects = await Project.populate(sampledProjects, [
+      { path: 'students.student', select: 'name profileImage course' },
+      { path: 'endorsements.professor', select: 'name academicTitle' }
+    ]);
 
     res.json(endorsedProjects);
   } catch (error) {
@@ -779,11 +817,11 @@ app.get('/projects-endorsed', async (req: Request, res: Response) => {
   }
 });
 
-// ==========================================
-// --- GERENCIAMENTO DE CHANCELAS (PROFESSORES) ---
-// ==========================================
 
-// 1. Buscar todos os projetos que um professor validou (Para o ProfileProf)
+
+
+
+
 app.get('/professors/:id/projects', async (req: Request, res: Response) => {
   try {
     const projects = await Project.find({ "endorsements.professor": req.params.id })
@@ -794,7 +832,7 @@ app.get('/professors/:id/projects', async (req: Request, res: Response) => {
   }
 });
 
-// 2. Editar o comentário da validação
+
 app.put('/projects/:projectId/endorse/:professorId', async (req: Request, res: Response) => {
   try {
     const { projectId, professorId } = req.params;
@@ -827,7 +865,7 @@ app.put('/projects/:projectId/endorse/:professorId', async (req: Request, res: R
   }
 });
 
-// 3. Remover a validação (Excluir)
+
 app.delete('/projects/:projectId/endorse/:professorId', async (req: Request, res: Response) => {
   try {
     const { projectId, professorId } = req.params;
@@ -859,7 +897,7 @@ app.delete('/projects/:projectId/endorse/:professorId', async (req: Request, res
   }
 });
 
-// --- INICIAR SERVIDOR ---
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor AcadeMe rodando na porta ${PORT}`);
 });
