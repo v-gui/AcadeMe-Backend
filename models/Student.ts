@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-// Validation function for array limit
+
 function arrayLimit(val: string[]): boolean {
   return val.length <= 5;
 }
@@ -15,7 +15,11 @@ export interface IStudent extends Document {
   contactLink?: string;
   password: string;
   interests: string[];
-  
+  emailVerified: boolean;
+  emailVerificationToken?: string;
+  emailVerificationExpires?: Date;
+  resetPasswordToken?: string;
+  resetPasswordExpires?: Date;
 }
 
 const StudentSchema: Schema = new Schema({
@@ -26,21 +30,22 @@ const StudentSchema: Schema = new Schema({
   profileImage: { type: String },
   contactLink: { type: String },
   password: { type: String, required: true },
+  emailVerified: { type: Boolean, default: false },
+  emailVerificationToken: { type: String, default: null },
+  emailVerificationExpires: { type: Date, default: null },
+  resetPasswordToken: { type: String, default: null },
+  resetPasswordExpires: { type: Date, default: null },
   interests: { 
     type: [String], 
     default: [],
-    // Opcional: Validação no banco para garantir o limite de 5
+
     validate: [arrayLimit, '{PATH} excede o limite de 5 áreas de interesse']
   }
 }, {
   timestamps: true 
 });
 
-/**
- * MIDDLEWARE: Hashing de senha automático
- * Antes de salvar o documento, o Mongoose verifica se a senha foi modificada
- * e aplica o hash (criptografia). Isso mantém a lógica de segurança centralizada no Model.
- */
+
 StudentSchema.pre<IStudent>('save', async function (next) {
   if (!this.isModified('password')) return next();
 
