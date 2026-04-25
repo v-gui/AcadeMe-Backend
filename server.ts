@@ -75,9 +75,11 @@ const buildEmailShell = (title: string, message: string, ctaLabel: string, ctaUr
         <h1 style="margin: 12px 0 0; color: #003465;">${title}</h1>
       </div>
       <p style="font-size: 16px; line-height: 1.6; color: #35516f;">${message}</p>
-      <a href="${ctaUrl}" style="display: inline-block; margin-top: 24px; background: linear-gradient(135deg, #006acb, #003465); color: #ffffff; text-decoration: none; font-weight: 700; padding: 14px 22px; border-radius: 999px;">
-        ${ctaLabel}
-      </a>
+      <div style="text-align: center; margin-top: 24px;">
+        <a href="${ctaUrl}" style="display: inline-block; background: linear-gradient(135deg, #006acb, #003465); color: #ffffff; text-decoration: none; font-weight: 700; padding: 14px 22px; border-radius: 999px;">
+          ${ctaLabel}
+        </a>
+      </div>
       <p style="margin-top: 24px; font-size: 12px; line-height: 1.6; color: #6c8299;">Se o botão não funcionar, copie e cole este link no navegador:<br />${ctaUrl}</p>
     </div>
   </div>
