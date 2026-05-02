@@ -55,7 +55,53 @@ const createMailTransport = () => {
   });
 };
 
+const sendEmailViaSendGridApi = async (to: string, subject: string, html: string) => {
+  const apiKey = process.env.SENDGRID_API_KEY || process.env.SMTP_PASS;
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER;
+
+  if (!apiKey || !from) {
+    throw new Error('SendGrid API não configurada. Defina SENDGRID_API_KEY/SMTP_PASS e MAIL_FROM.');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: to }] }],
+        from: { email: from },
+        subject,
+        content: [{ type: 'text/html', value: html }]
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`SendGrid API respondeu com status ${response.status}. ${errorText}`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 const sendEmail = async (to: string, subject: string, html: string) => {
+  const isSendGridSmtp =
+    process.env.SMTP_HOST === 'smtp.sendgrid.net' &&
+    process.env.SMTP_USER === 'apikey' &&
+    Boolean(process.env.SMTP_PASS);
+
+  if (isSendGridSmtp) {
+    await sendEmailViaSendGridApi(to, subject, html);
+    return;
+  }
+
   const transporter = createMailTransport();
   const from = process.env.MAIL_FROM || process.env.SMTP_USER;
 
