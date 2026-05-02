@@ -1040,13 +1040,13 @@ app.put('/projects/:projectId/respond-professor-invite', async (req: Request, re
       return res.status(404).json({ error: 'Projeto ou convite não encontrado.' });
     }
 
-    invitedProfessor.status = status;
-
     const existingEndorsement = project.endorsements.find(
       (endorsement: any) => endorsement.professor.toString() === professorId
     );
 
     if (status === 'accepted') {
+      invitedProfessor.status = status;
+
       if (!existingEndorsement) {
         project.endorsements.push({
           professor: professorId,
@@ -1059,6 +1059,10 @@ app.put('/projects/:projectId/respond-professor-invite', async (req: Request, re
     }
 
     if (status === 'declined') {
+      project.invitedProfessors = project.invitedProfessors.filter(
+        (invite: any) => invite.professor.toString() !== professorId
+      ) as any;
+
       project.endorsements = project.endorsements.filter(
         (endorsement: any) => endorsement.professor.toString() !== professorId
       ) as any;
